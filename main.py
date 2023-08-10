@@ -1,253 +1,510 @@
-import pandas as pd
-import numpy as np
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-import openpyxl
-from glob import glob
-import os
+from openpyxl.utils.dataframe import dataframe_to_rows
+import numpy as np
+import pandas as pd
+from allocation_func import all_func
+from datetime import datetime
 
-lst_nazva = []
+startTime = datetime.now()
+pd.options.mode.chained_assignment = None
+
+pd.set_option('display.max_rows', 5000)
+pd.set_option('display.max_columns', 5000)
+pd.set_option('display.width', 5000)
 
 
-def union(units, business, NII):
-    pd.set_option('display.max_rows', 5000)
-    pd.set_option('display.max_columns', 5000)
-    pd.set_option('display.width', 5000)
+def person(name_bi_, name_alloc_, sheet):
 
-    # Заголовочная часть таблицы
-    ostatok_1_units = units[['№ (рівень 1)', 'Назва (рівень 1)', '№ (рівень 2)', 'Назва (рівень 2)', '№ (рівень 3)',
-                             'Назва (рівень 3)', 'Група статей (рівень.4)',
-                             'Наименование группы 4', 'БАНК (п.), грн.', 'БАНК (ф.), грн.', 'БАНК (%)']]
+    shablon = pd.read_excel('Шаблон.xlsx')
+    business = pd.read_excel(name_bi_)
 
-    # Значения с таблицы бизнесов
-    business.drop(
-        ['№ (рівень 1)', 'Назва (рівень 1)', '№ (рівень 2)', 'Назва (рівень 2)', '№ (рівень 3)', 'Назва (рівень 3)',
-         'Група статей (рівень.4)',
-         'Наименование группы 4', 'БАНК (п.), грн.', 'БАНК (ф.), грн.', 'БАНК (%)'],
-        axis=1,  # удаление строк происходит аналогично, чтобы удалить именно колонки, выбираем соответствующую ось
-        inplace=True  # удаление "на месте", без присваивания новой переменной
-    )
+    # датафрейм с планом 5.3. и 5.4.
+    state_alloc = business[business['Наименование бизнеса'] == 'Банк'].reset_index(drop=True)
 
-    bus_copy = business.copy()
+    business = business.loc[~business['Наименование бизнеса'].isin(['Банк'])].reset_index(drop=True)
+    business['план'] = business['план'].fillna(0)
+    business['факт'] = business['факт'].fillna(0)
+    business['виконання %'] = 0
+    for i in range(len(business)):
+        if business['план'][i] != 0:
+            business['виконання %'][i] = round(business['факт'][i] / business['план'][i] * 100)
+        else:
+            business['виконання %'][i] = 100
+    business['план'] = business['план'].replace(1, 0)
+    business['відхилення'] = business['факт'] - business['план']
 
-    # Выравнивание значений и замена на пустоту
-    for i in range(20, 26):
-        bus_copy.loc[i] = np.nan
-    nan = bus_copy.drop(bus_copy.index[0:20])
-    nan = nan.drop(nan.index[6:len(nan)])
-    df = pd.DataFrame(business[20:len(business)])
-    df.index = (df.index + 6)
-    buss = business.drop(business.index[20:len(business)])
-    business1 = pd.concat([buss, nan], axis=0)
-    business2 = pd.concat([business1, df], axis=0)
+    table_names = business['Наименование бизнеса'].drop_duplicates()
+    table_names = list(sorted(table_names))
 
-    # Значения с таблицы юнитов
-    units.drop(
-        ['№ (рівень 1)', 'Назва (рівень 1)', '№ (рівень 2)', 'Назва (рівень 2)', '№ (рівень 3)', 'Назва (рівень 3)',
-         'Група статей (рівень.4)',
-         'Наименование группы 4', 'БАНК (п.), грн.', 'БАНК (ф.), грн.', 'БАНК (%)'],
-        axis=1,  # удаление строк происходит аналогично, чтобы удалить именно колонки, выбираем соответствующую ось
-        inplace=True  # удаление "на месте", без присваивания новой переменной
-    )
 
-    combiend_df_1 = pd.concat([ostatok_1_units, business2], axis=1)
-
-    # Об'єднана таблиця фул
-    combiend_df_2 = pd.concat([combiend_df_1, units], axis=1)
-    # ========================================================================================================
-    # Таблица для агрегирования
-    cd2 = combiend_df_2.copy()
-    cd2.drop(
-        ['№ (рівень 1)', 'Назва (рівень 1)', '№ (рівень 2)', 'Назва (рівень 2)', '№ (рівень 3)', 'Назва (рівень 3)',
-         'Група статей (рівень.4)',
-         'Наименование группы 4'],
-        axis=1,  # удаление строк происходит аналогично, чтобы удалить именно колонки, выбираем соответствующую ось
-        inplace=True  # удаление "на месте", без присваивания новой переменной
-    )
-
-    # Агрегирования данных по Комисионным доходам
-    combiend_df_2.set_index('№ (рівень 1)', inplace=True)
-    riven_4_2 = combiend_df_2.loc['4.2.']
-
-    part1 = riven_4_2.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].max()
-    part2 = riven_4_2.groupby(by=['№ (рівень 2)', 'Назва (рівень 2)'])[cd2.columns].sum()
-    part3 = riven_4_2.groupby(by=['№ (рівень 3)', 'Назва (рівень 3)'])[cd2.columns].sum()
-    part4 = riven_4_2.groupby(by=['Група статей (рівень.4)', 'Наименование группы 4'])[cd2.columns].sum()
-
-    res = pd.concat([part1, part2, part3, part4], axis=0)
-
-    # Агрегирования данных по Комиссионным затратам
-    riven_5_2 = combiend_df_2.loc['5.2.']
-    vytraty1 = riven_5_2.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].min()
-    vytraty2 = riven_5_2.groupby(by=['№ (рівень 2)', 'Назва (рівень 2)'])[cd2.columns].sum()
-    vytraty3 = riven_5_2.groupby(by=['№ (рівень 3)', 'Назва (рівень 3)'])[cd2.columns].sum()
-
-    res2 = pd.concat([vytraty1, vytraty2, vytraty3], axis=0)
-
-    # Комиссиоонные доходы и затраты
-    data = pd.DataFrame(pd.concat([res, res2], axis=0))
-    data = data.sort_values(by='№ (рівень 1)')
-
-    # ======================================================================================================================
-    # Чистый комиссионный доход
-    clear_dohid = data.loc['4.2.', 'Комісійні доходи'] + data.loc['5.2.', 'Комісійні витрати']
-    df_cd = pd.DataFrame(clear_dohid).T
-    fors = pd.DataFrame(
-        data={
-            '№ (рівень 1)': [''],
-            'Назва (рівень 1)': ['Чистий комісійний дохід']
-        })
-    clear_dohid_full = pd.concat([fors, df_cd], axis=1)
-
-    def zamena_indexa(table):
-        table.reset_index(
-            drop=False,  # False означает, что существующий индекс переместится в колонки, а не будет удален
-            inplace=True  # произвести операцию на месте, без присваивания новой переменной
+    def transposition(value):
+        wide_titanic = business.pivot(
+            index=['Код статьи', 'Наименование статьи'],
+            columns='Наименование бизнеса',
+            values=value
         )
+        wide_titanic.reset_index(drop=False, inplace=True)
+        return wide_titanic
 
-    zamena_indexa(data)
+    lst_num = ["план", 'факт', "відхилення", "виконання %"]
 
-    data = pd.concat([data, clear_dohid_full])
+    concat_df = pd.concat([transposition(lst_num[i]) for i in range(len(lst_num))], axis=1, ignore_index=True)
+    concat_df = concat_df.rename(columns={0: 'newName0', 1: 'newName1'})
 
-    # ======================================================================================================================
-    # Чистые доходы
-    urovni = combiend_df_2.loc['4.3.':'4.5.']
-    r1 = urovni.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].sum()
-    zamena_indexa(r1)
+    def moving(x):
+        data = concat_df.iloc[:, [x, x + 7, x + 14, x + 21]]
+        return data
 
-    # Другие доходы
-    urovni2 = combiend_df_2.loc['4.6.':'4.7.']
-    r2 = urovni2.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].sum()
-    zamena_indexa(r2)
-
-    # Другие операционные доходы
-    riven_4_8 = combiend_df_2.loc['4.8.']
-    insh_op_doh_1 = riven_4_8.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].max()
-    insh_op_doh_2 = riven_4_8.groupby(by=['№ (рівень 2)', 'Назва (рівень 2)'])[cd2.columns].sum()
-    res3 = pd.concat([insh_op_doh_1, insh_op_doh_2], axis=0)
-    zamena_indexa(res3)
-
-    # Другие доходы
-    riven_4_9 = combiend_df_2.loc['4.9.']
-    insh_doh_1 = riven_4_9.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].max()
-    insh_doh_2 = riven_4_9.groupby(by=['№ (рівень 2)', 'Назва (рівень 2)'])[cd2.columns].sum()
-    res4 = pd.concat([insh_doh_1, insh_doh_2], axis=0)
-    zamena_indexa(res4)
-
-    data = pd.concat([data, r1, r2, res3, res4])
-
-    # =======================================================================================================================
-    # Внутренние комиссионые доходы и затраты
-    vnutrishni = combiend_df_2.loc['4.10.':'5.10.']
-    vnutrishni2 = vnutrishni.groupby(by=['№ (рівень 1)', 'Назва (рівень 1)'])[cd2.columns].max()
-    vnutrishni2 = vnutrishni2.iloc[:2]
-
-    # Чистые внутренние комиссионые доходы
-    clear_vnutri_dohid = vnutrishni2.loc['4.10.', 'Внутрішні комісійні доходи'] + \
-                         vnutrishni2.loc['5.10.', 'Внутрішні комісійні витрати']
-    clear_vnutri_dohid = pd.DataFrame(clear_vnutri_dohid).T
-    fors2 = pd.DataFrame(
-        data={
-            '№ (рівень 1)': [''],
-            'Назва (рівень 1)': ['Чистий внутрішній комісійний дохід']
-        })
-    clear_vnutri_dohid_full = pd.concat([fors2, clear_vnutri_dohid], axis=1)
-
-    zamena_indexa(vnutrishni2)
-    data = pd.concat([data, vnutrishni2, clear_vnutri_dohid_full])
-
-    # Непроцентнные доходы
-    neprocentni = combiend_df_2.iloc[-1].drop(['№ (рівень 2)', 'Назва (рівень 2)', '№ (рівень 3)', 'Назва (рівень 3)',
-                                               'Група статей (рівень.4)', 'Наименование группы 4'])
-    neprocentni[0] = 'Непроцентні доходи'
-    neprocentni = pd.DataFrame(neprocentni).T
-    data = pd.concat([data, neprocentni])
-
-    data = data.replace(0, np.nan)
-
-    # Расчет процентной части
-    data['БАНК (%)'] = round(data['БАНК (ф.), грн.'] / data['БАНК (п.), грн.'] * 100)
-    data.iloc[:, 4::3] = np.round(data.iloc[:, 3::3].values / data.iloc[:, 2::3].values * 100)
-    data = data.replace(np.nan, 0)
-    data.iloc[:, 4::3] = data.iloc[:, 4::3].astype(str) + '%'
-    data.iloc[:, 3::3] = np.round(data.iloc[:, 3::3] / 1000)
-    data.iloc[:, 2::3] = np.round(data.iloc[:, 2::3] / 1000)
-
-    for i in data.columns[17::3]:
-        lst_nazva.append(i)
-
-    for i in data.iloc[:, 4::3]:
-        data.rename(columns={i: ' % виконання м/п '}, inplace=True)
-
-    for i in data.iloc[:, 3::3]:
-        data.rename(columns={i: '   Факт    '}, inplace=True)
-
-    for i in data.iloc[:, 2::3]:
-        data.rename(columns={i: '   План    '}, inplace=True)
-
-    data.set_index('№ (рівень 1)', inplace=True)
-
-    data.to_excel(NII)
+    lst_count_buss = [2, 3, 4, 5, 6]
 
 
-filename_month_unit = glob('Бізнес-юніти на*.xlsx')[0]
-filename_month_business = glob('Бізнес на*.xlsx')[0]
+    concat_df_ = pd.concat([moving(lst_count_buss[i]) for i in range(len(lst_count_buss))], axis=1, ignore_index=True)
+    concat_df_2 = pd.concat([concat_df.iloc[:, :2], concat_df_], axis=1)
 
-# Извлечение даты с названия файла
-date_unit = str(glob('Бізнес-юніти на*.xlsx')[0])
-date_unit_full = date_unit.split()[2]
-lst_date = []
-for i in date_unit_full.split('.'):
-    if i.isnumeric() == True:
-        lst_date.append(i)
-correct_date = "-".join(lst_date)
+    alone_lst = list(
+        [concat_df_2.iloc[i, 0] for i in range(len(concat_df_2)) if concat_df_2.iloc[i, 0].startswith('4.11')
+         or concat_df_2.iloc[i, 0].startswith('5.11')]) + ['4.10.10.', '5.10.10.']
 
-filename_nakopytel_unit = glob('Бізнес-юніти накопичувально на*.xlsx')[0]
-filename_nakopytel_business = glob('Бізнес накопичувально на*.xlsx')[0]
+    # важные (датафрейм с трансфертами и без) ====================
+    alone_df = concat_df_2.loc[concat_df_2.iloc[:, 0].isin(alone_lst)]
+    concat_df_2 = concat_df_2.loc[~concat_df_2.iloc[:, 0].isin(alone_lst)].reset_index(drop=True)
+    # ==================================
 
-union(pd.read_excel(filename_nakopytel_unit), pd.read_excel(filename_nakopytel_business), 'NII - test year.xlsx')
-union(pd.read_excel(filename_month_unit), pd.read_excel(filename_month_business), 'NII - test month.xlsx')
-
-
-# =======================================================================================================
-# ========================================================================================================
-#                                               OPENPYXL
+    # Статьи которые в шаблоне и в базе, но как цветные ====================
+    lst_shablon = []
+    for i in range(len(concat_df_2)):
+        if concat_df_2.iloc[i, 0] in shablon['Код статьи'].to_list():
+            lst_shablon.append(concat_df_2.iloc[i, 0])
+    shablon_for_merge = concat_df_2.loc[concat_df_2.iloc[:, 0].isin(lst_shablon)]
 
 
-def formating(NII_test, file_NII):
-    wb = openpyxl.load_workbook(NII_test)
-    Sheet = wb['Sheet1']
-    Sheet.title = 'НЕПРОЦЕНТНІ ДОХОДИ'
-    ws = wb['НЕПРОЦЕНТНІ ДОХОДИ']
+    # датафрейм базы очищенный
+    concat_df_2 = concat_df_2.loc[~concat_df_2.iloc[:, 0].isin(lst_shablon)].reset_index(drop=True)
 
-    data = pd.read_excel(NII_test)
+    CHek = shablon['Код статьи'][shablon['Чек'] != 1.0].to_list()
+    chek_2 = shablon['Код статьи'][shablon['Чек_2'] == 1.0].to_list()
+    chek_3 = shablon['Код статьи'][shablon['Чек_3'] == 1.0].to_list()
 
-    # Формирование списков по урованям
-    list_rivni, blue, gray, thin = [], [], [], []
-    lst_level = []
-    for i in range(2, len(data.values) + 2):
-        list_rivni.append(ws['A' + str(i)].value)
-    for i in list_rivni:
-        if i is not None:
-            lst_level.append(i)
-    for i in lst_level:
-        if len(str(i)) == 4:
-            blue.append(i)
-        elif len(str(i)) == 6 or len(str(i)) == 7:
-            gray.append(i)
-        elif len(str(i)) == 10 or len(str(i)) == 11:
-            thin.append(i)
+    df_lst_map = []
+    for i in range(len(CHek)):
+        second_df = []
+        if CHek[i] not in chek_2:
+            df_lst_map.append(CHek[i])
+        elif CHek[i] in chek_2:
+            for j in range(len(shablon)):
+                if shablon['Код статьи'][j].startswith(CHek[i]):
+                    if shablon['Код статьи'][j] not in chek_3:
+                        second_df.append(shablon['Код статьи'][j])
+            for k in range(len(concat_df_2)):
+                if concat_df_2['newName0'][k].startswith(CHek[i]):
+                    second_df.append(concat_df_2['newName0'][k])
+            second_df = sorted(second_df)
+            for h in range(len(second_df)):
+                df_lst_map.append(second_df[h])
+
+    # Полный порядок только статтей
+    data = pd.DataFrame(data={'Код статьи': df_lst_map})
+    data = data.drop_duplicates(keep='first').reset_index(drop=True)
+
+    def nlo(state, data, chek_2):
+        lst_key = []
+        lst_val = []
+        for i in range(len(data)):
+            if data['Код статьи'][i].startswith(state):
+                lst_key.append(i)
+                lst_val.append(data['Код статьи'][i])
+        if len(lst_key) > 2:
+            while len(lst_key) > 2:
+                data = data.drop(lst_key[-1], axis=0)
+                line = pd.DataFrame({"Код статьи": lst_val[-1]}, index=[lst_key[1] + 0.5])
+                data = data.append(line, ignore_index=False)
+                data = data.sort_index().reset_index(drop=True)
+                chek_2.append(lst_val[-1])
+                lst_key.pop(-1)
+                lst_val.pop(-1)
+        return data
+
+    data = nlo('5.3.6.38.', data, chek_2)
+    data = nlo('5.4.6.5.26.', data, chek_2)
+
+    lst_rez = []
+    lst_rez_drop = []
+
+    for i in range(len(data)):
+        if data['Код статьи'][i] == '5.5.7.2.1.2.' or data['Код статьи'][i] == '5.5.7.2.2.2.':
+            data = data.drop(i, axis=0)
+    data = data.reset_index(drop=True)
+
+    for i in range(len(data)):
+        for j in range(4, 8):
+            if data['Код статьи'][i] == f'5.5.7.{j}.':
+                lst_rez.append(data['Код статьи'][i])
+                lst_rez_drop.append(i)
+
+
+    for i in range(len(lst_rez_drop)):
+        data = data.drop(lst_rez_drop[i], axis=0
+                         )
+    data = data.reset_index(drop=True)
+
+    line = 0
+    for i in range(len(data)):
+        if data['Код статьи'][i] == '5.5.7.':
+            line = pd.DataFrame({"Код статьи": '5.5.7.2.1.2.'}, index=[i + 0.5])
+            data = data.append(line, ignore_index=False)
+            data = data.sort_index().reset_index(drop=True)
+
+    for i in range(len(data)):
+        if data['Код статьи'][i] == '5.5.7.2.1.2.':
+            line = pd.DataFrame({"Код статьи": '5.5.7.2.2.2.'}, index=[i + 0.5])
+            data = data.append(line, ignore_index=False)
+            data = data.sort_index().reset_index(drop=True)
+
+
+    lst_rez = lst_rez[::-1]
+
+    for i in range(len(data)):
+        if data['Код статьи'][i] == "#16":
+            for j in range(len(lst_rez)):
+                line = pd.DataFrame({"Код статьи": lst_rez[j]}, index=[i + 0.5])
+                data = data.append(line, ignore_index=False)
+                data = data.sort_index().reset_index(drop=True)
+
+
+    data = data.drop_duplicates().reset_index(drop=True)
+
+
+    # Датафрейм с наименования шаблона (без базы)
+    merge_tab = pd.merge(left=data, right=shablon, left_on='Код статьи', right_on='Код статьи', how='left')
+    merge_tab = merge_tab[['Код статьи', 'Наименование']]
+
+    # Обьедененная таблица с цветными и базой
+    df_values = pd.concat([concat_df_2, shablon_for_merge], axis=0)
+
+    # Полный комплект
+    all_merge = pd.merge(left=merge_tab, right=df_values, left_on='Код статьи', right_on='newName0', how='left')
+    all_merge['Наименование'] = all_merge['Наименование'].fillna(all_merge['newName1'])
+    all_merge = all_merge.drop(['newName0', 'newName1'], axis=1)
+
+
+
+
+
+
+    def func(tini_df):
+        tini_df['план_'] = tini_df.iloc[:, 2::4].sum(axis=1)
+        tini_df['факт_'] = tini_df.iloc[:, 3::4].sum(axis=1)
+        tini_df['відхилення_'] = tini_df.iloc[:, 4::4].sum(axis=1)
+        tini_df['виконання %_'] = tini_df.iloc[:, 5::4].sum(axis=1)
+
+        tini_df['_план_'] = tini_df.iloc[:, [2, 10]].sum(axis=1)
+        tini_df['_факт_'] = tini_df.iloc[:, [3, 11]].sum(axis=1)
+        tini_df['_відхилення_'] = tini_df.iloc[:, [4, 12]].sum(axis=1)
+        tini_df['_виконання %_'] = tini_df.iloc[:, [5, 13]].sum(axis=1)
+
+        consol_bank = tini_df.iloc[:, 22:26]
+        corp_buss = tini_df.iloc[:, 26:30]
+        corp_net = tini_df.iloc[:, 10:14]
+        vip = tini_df.iloc[:, 2:6]
+        msb = tini_df.iloc[:, 14:18]
+        rozdrib = tini_df.iloc[:, 18:22]
+        inshi = tini_df.iloc[:, 6:10]
+
+        conclusion = pd.concat([tini_df.iloc[:, [0, 1]], consol_bank, corp_buss, corp_net, vip, msb, rozdrib, inshi],
+                               axis=1)
+        return conclusion
+
+    conclusion = func(all_merge)
+
+    lst_columns = ['Код статьи', 'Наименование статьи'] + lst_num * (len(table_names) + 2)
+    conclusion.columns = lst_columns
+
+
+
+    # Расчет трансфертов
+    transfert = func(alone_df)
+    transfert.columns = lst_columns
+    transfert = transfert.reset_index(drop=True)
+
+    transfert_dohid_4 = ('4.11.', '4.10.10.')
+    first_trans = transfert[transfert['Код статьи'].str.startswith(transfert_dohid_4)]
+    first_trans.loc['Row_plan'] = {'Код статьи': '$', 'Наименование статьи': 'Трансферти_4.11.'}
+    first_trans.iloc[-1, 2:] = first_trans.iloc[:, 2:].sum(axis=0)
+    first_trans.iloc[-1, 2:5] = 0
+
+    transfert_vytrat_5 = ('5.11.', '5.10.10.')
+    second_trans = transfert[transfert['Код статьи'].str.startswith(transfert_vytrat_5)]
+    second_trans.loc['Row_plan'] = {'Код статьи': '$', 'Наименование статьи': 'Трансферти_5.11.'}
+    second_trans.iloc[-1, 2:] = second_trans.iloc[:, 2:].sum(axis=0)
+    second_trans.iloc[-1, 2:5] = 0
+
+
+
+    conclusion = conclusion.fillna(0)
+    for i in range(len(conclusion)):
+        if conclusion['Код статьи'][i] == '!1':
+            conclusion.iloc[i, 2:] += second_trans.iloc[-1, 2:]
+        elif conclusion['Код статьи'][i] == '!2':
+            conclusion.iloc[i, 2:] += first_trans.iloc[-1, 2:]
+
+
+    for i in range(len(conclusion)):
+        for j in range(len(state_alloc)):
+            if conclusion['Код статьи'][i] == state_alloc['Код статьи'][j]:
+                conclusion.iloc[i, 2] = state_alloc.iloc[j, 6]
+
+    allocation = pd.read_excel(name_alloc_)
+    allocation = allocation.loc[~allocation['Функционал-юнит (источник)'].isin(['нет в'])].reset_index(
+        drop=True)
+    all_for_bus = ('1.6.', '1.4.')
+    allocation = allocation[allocation['Тип связи'].str.startswith(all_for_bus)].reset_index(drop=True)
+    allocation = allocation.iloc[:, [0, 4, 6, 7]]
+    table_names_all = allocation['Наименование бизнеса'].drop_duplicates()
+    table_names_all = list(sorted(table_names_all))
+    name_all = 0
+    for i in range(len(table_names_all)):
+        if len(table_names_all) < len(table_names):
+            name_all = "".join(list(set(table_names) - set(table_names_all)))
+    allocation.loc[-1] = {'Тип связи': '1.4.', 'Наименование бизнеса': name_all, 'факт': 0, 'план': 0}
+    allocation.reset_index(drop=True, inplace=True)
+    allocation.loc[-1] = {'Тип связи': '1.6.', 'Наименование бизнеса': name_all, 'факт': 0, 'план': 0}
+    allocation.reset_index(drop=True, inplace=True)
+
+    allocation['план'] = allocation['план'].fillna(0)
+    allocation['факт'] = allocation['факт'].fillna(0)
+
+    aggr_data = allocation.groupby(by=['Тип связи', 'Наименование бизнеса'])[
+        ['факт', 'план']].sum()
+    aggr_data = aggr_data.reset_index(drop=False)
+
+
+    aggr_data['відхилення'] = aggr_data['факт'] - aggr_data['план']
+    aggr_data['виконання %'] = 0
+    for i in range(len(aggr_data)):
+        if aggr_data['план'][i] != 0:
+            aggr_data['виконання %'][i] = round(aggr_data['факт'][i] / aggr_data['план'][i] * 100)
+        else:
+            aggr_data['виконання %'][i] = 100
+
+
+
+
+
+    def transposition_2(value):
+        wide_titanic = aggr_data.pivot(
+            index=['Тип связи'],
+            columns='Наименование бизнеса',
+            values=value
+        )
+        wide_titanic.reset_index(drop=False, inplace=True)
+        return wide_titanic
+
+    all_pivot = pd.concat([transposition_2(lst_num[i]) for i in range(len(lst_num))], axis=1, ignore_index=True)
+    all_pivot = all_pivot.rename(columns={0: 'newName0'})
+
+
+    def moving_2(x):
+        data = all_pivot.iloc[:, [x, x + 6, x + 12, x + 18]]
+        return data
+
+    lst_count_buss = [1, 2, 3, 4, 5]
+
+    refresh_all = pd.concat([moving_2(lst_count_buss[i]) for i in range(len(lst_count_buss))], axis=1,
+                            ignore_index=True)
+
+    refresh_all = pd.concat([all_pivot.iloc[:, :1], all_pivot.iloc[:, :1], refresh_all], axis=1)
+
+
+    stroki_all = func(refresh_all)
+    lst_columns_all = ['Код статьи', 'Наименование статьи'] + lst_num * (len(table_names) + 2)
+    stroki_all.columns = lst_columns_all
+    stroki_all.iloc[:, 2:6] = 0
+
+
+    for i in range(len(conclusion)):
+        for j in range(len(stroki_all)):
+            if conclusion['Код статьи'][i] == stroki_all['Код статьи'][j]:
+                conclusion.iloc[i, 2:] = stroki_all.iloc[j, 2:]
+    def counter(prep_num, next_num):
+        count = next_num
+        zone_1 = prep_num
+        try:
+            while len(conclusion['Код статьи'][prep_num].split('.')) < \
+                    len(conclusion['Код статьи'][next_num].split('.')) and conclusion['Код статьи'][prep_num].split(
+                '.')[:2] == \
+                    conclusion['Код статьи'][next_num].split('.')[:2]:
+                count += 1
+                next_num += 1
+        except:
+            print('-')
+
+        conclusion.iloc[prep_num, 2:] = conclusion.iloc[zone_1:count, 2:].sum(axis=0)
+
+        return conclusion
+
+    tini_df = 0
+    for i in range(len(conclusion) - 2):
+        tini_df = counter(i, i + 1)
+
+
+
+    name_code = tini_df[['Наименование статьи']]
+    name_state = tini_df[['Код статьи']]
+    tini_df = tini_df.drop(['Наименование статьи'], axis=1)
+    tini_df.set_index('Код статьи', inplace=True)
+
+    tini_df.loc['#1'] = tini_df.loc['4.1.'] + tini_df.loc['!1']
+    tini_df.loc['#2'] = tini_df.loc['5.1.'] + tini_df.loc['!2']
+    tini_df.loc['!3'] = tini_df.loc['5.5.1.'] + tini_df.loc['5.5.3.']
+    tini_df.loc['#3'] = tini_df.loc['#1'] + tini_df.loc['#2']
+    tini_df.loc['#4'] = tini_df.loc['#3'] + tini_df.loc['!3']
+    tini_df.loc['#5'] = tini_df.loc['4.2.'] + tini_df.loc['5.2.']
+    tini_df.loc['#6'] = tini_df.loc['4.3.'] + tini_df.loc['5.5.4.4.']
+    tini_df.loc['#7'] = tini_df.loc['4.10.'] + tini_df.loc['5.10.']
+    tini_df.loc['5.5.7.'] = tini_df.loc['5.5.7.2.1.2.'] + tini_df.loc['5.5.7.2.2.2.']
+    tini_df.loc['#8'] = tini_df.loc['4.8.'] + tini_df.loc['4.9.'] + tini_df.loc['4.6.'] + tini_df.loc['4.7.']
+
+    if '4.3.1.2.' in tini_df.index:
+        print('yes')
+        tini_df.loc['#9'] = tini_df.loc['#5'] + tini_df.loc['4.3.'] - (tini_df.loc['4.3.1.2.'] + tini_df.loc['4.3.2.2.'] +
+                                                                   tini_df.loc['4.3.3.2.'] + tini_df.loc['4.3.4.2.'] +
+                                                                   tini_df.loc['4.3.5.2.'] + tini_df.loc['4.3.6.2.']) + \
+                        tini_df.loc['#7'] + tini_df.loc['4.4.'] + tini_df.loc['4.5.'] + tini_df.loc['#8'] - \
+                        tini_df.loc['4.9.17.'] - tini_df.loc['4.5.2.'] - tini_df.loc['5.3.10.'] - tini_df.loc['4.8.2.1.1.2.']
+    else:
+        tini_df.loc['#9'] = tini_df.loc['#5'] + tini_df.loc['4.3.'] - (
+                    tini_df.loc['4.3.2.2.'] +
+                    tini_df.loc['4.3.3.2.'] + tini_df.loc['4.3.4.2.'] +
+                    tini_df.loc['4.3.5.2.'] + tini_df.loc['4.3.6.2.']) + \
+                            tini_df.loc['#7'] + tini_df.loc['4.4.'] + tini_df.loc['4.5.'] + tini_df.loc['#8'] - \
+                            tini_df.loc['4.9.17.'] - tini_df.loc['4.5.2.'] - tini_df.loc['5.3.10.'] - tini_df.loc[
+                                '4.8.2.1.1.2.']
+    tini_df.loc['!4'] = tini_df.loc['5.5.7.1.'] + tini_df.loc['5.5.7.2.'] + tini_df.loc['5.5.7.']
+    tini_df.loc['#10'] = tini_df.loc['4.13.'] + tini_df.loc['4.8.11.'] + tini_df.loc['5.13.'] + tini_df.loc['5.3.13.']
+    tini_df.loc['#11'] = tini_df.loc['4.8.9.25.'] + tini_df.loc['4.9.16.'] + tini_df.loc['5.3.6.38.'] + tini_df.loc[
+        '5.4.6.5.26.']
+    tini_df.loc['#12'] = tini_df.loc['#3'] + tini_df.loc['#5'] + tini_df.loc['#6'] + tini_df.loc['#7'] + \
+                         tini_df.loc['4.4.'] + tini_df.loc['4.14.'] + \
+                         tini_df.loc['4.5.'] + tini_df.loc['#8'] + tini_df.loc['#10'] + tini_df.loc['#11']
+    tini_df.loc['#13'] = tini_df.loc['#12'] + tini_df.loc['!4'] + tini_df.loc['5.5.4.4.'] + tini_df.loc['!3']
+    tini_df.loc['!5'] = tini_df.loc['4.10.4.'] + tini_df.loc['4.10.5.'] + tini_df.loc['4.10.6.']
+    tini_df.loc['!6'] = tini_df.loc['5.10.4.'] + tini_df.loc['5.10.5.'] + tini_df.loc['5.10.6.']
+    tini_df.loc['#14'] = tini_df.loc['!5'] + tini_df.loc['!6']
+    tini_df.loc['#15'] = tini_df.loc['5.3.'] + tini_df.loc['5.4.'] + tini_df.loc['1.6.'] + tini_df.loc['1.4.']
+    if len(lst_rez) > 1:
+        tini_df.loc['#16'] = tini_df.loc['5.5.8.'] + tini_df.loc['5.5.7.4.'] + tini_df.loc['5.5.7.6.']
+    else:
+        tini_df.loc['#16'] = tini_df.loc['5.5.8.'] + tini_df.loc['5.5.7.4.']
+    tini_df.loc['#17'] = tini_df.loc['#16'] + tini_df.loc['#15'] + tini_df.loc['#14'] + tini_df.loc['#13']
+
+    tini_df.reset_index(
+        drop=False,  # False означает, что существующий индекс переместится в колонки, а не будет удален
+        inplace=True  # произвести операцию на месте, без присваивания новой переменной
+    )
+
+    res_finish_ = pd.concat([name_state, name_code, tini_df.iloc[:, 1:]], axis=1)
+    # if __name__ == '__main__':
+
+    all_finish = all_func(name_alloc_)
+    res_finish_ = res_finish_
+
+    save_col = res_finish_.columns
+    res_finish_.columns = list(range(1, 31))
+    all_finish.columns = list(range(1, 31))
+    res = pd.concat([res_finish_, all_finish], axis=0).reset_index(drop=True)
+    res.columns = save_col
+    res.set_index('Код статьи', inplace=True)
+    res.loc['#18'] = res.loc['#17'] + res.loc['!7'] + res.loc['5.6.']
+    res.iloc[len(res) - 1, 0] = 'ПРИБУТОК після аллокацій та оподаткування'
+    res.reset_index(
+        drop=False,  # False означает, что существующий индекс переместится в колонки, а не будет удален
+        inplace=True  # произвести операцию на месте, без присваивания новой переменной
+    )
+
+    num_col = 2
+    while num_col <= 27:
+        for i in range(len(res)):
+            res.iloc[i, num_col + 2] = res.iloc[i, num_col + 1] - res.iloc[i, num_col]
+            if -1 < res.iloc[i, num_col] < 1:
+                res.iloc[i, num_col] = 0
+            if res.iloc[i, num_col] == 0:
+                if res.iloc[i, num_col + 1] == 0:
+                    res.iloc[i, num_col + 3] = '-'
+                elif res.iloc[i, num_col + 1] > 0:
+                    res.iloc[i, num_col + 3] = '300%+'
+                elif res.iloc[i, num_col + 1] < 0:
+                    res.iloc[i, num_col + 3] = '- 300%+'
+            elif res.iloc[i, num_col + 1] == 0:
+                if res.iloc[i, num_col] > 0:
+                    res.iloc[i, num_col + 3] = '0%'
+                elif res.iloc[i, num_col] < 0:
+                    res.iloc[i, num_col + 3] = '300%+'
+            elif res.iloc[i, num_col + 1] < 0 and res.iloc[i, num_col] < 0:
+                res.iloc[i, num_col + 3] = res.iloc[i, num_col] / res.iloc[i, num_col + 1]
+                if res.iloc[i, num_col + 3] > 3:
+                    res.iloc[i, num_col + 3] = '300%+'
+            elif res.iloc[i, num_col + 1] > 0 and res.iloc[i, num_col] > 0:
+                res.iloc[i, num_col + 3] = res.iloc[i, num_col + 1] / res.iloc[i, num_col]
+                if res.iloc[i, num_col + 3] > 3:
+                    res.iloc[i, num_col + 3] = '300%+'
+            else:
+                res.iloc[i, num_col + 3] = '300%+'
+        num_col += 4
+
+
+    wb = Workbook()
+    ws = wb.active
+
+    for r in dataframe_to_rows(res, index=False):
+        ws.append(r)
 
     for column in ws.columns:
         lenght = max(len(str(cell.value)) for cell in column)
-        lenght = lenght if lenght <= 75 else 75
         ws.column_dimensions[column[0].column_letter].width = lenght
+
+    union = chek_3 + ['#18']
+    blue = []
+    grey = chek_2
+    thin = []
+    all_color = []
+    for i in range(len(all_finish)):
+        if len(all_finish.iloc[i, 0]) > 4:
+            all_color.append(all_finish.iloc[i, 0])
+
+    for i in range(len(union)):
+        if '#' in union[i]:
+            blue.append(union[i])
+        elif '4.4.' in union[i]:
+            blue.append(union[i])
+        elif '4.14.' in union[i]:
+            blue.append(union[i])
+        elif '4.5.' in union[i]:
+            blue.append(union[i])
+    for word in blue:
+        union.remove(word)
+
+    for i in range(len(res)):
+        if res['Код статьи'][i] not in union and res['Код статьи'][i] not in grey and res['Код статьи'][i] not in blue:
+            thin.append(res['Код статьи'][i])
+
+    all_col = ['1.2.', '1.7.', '1.1.']
+    thin.remove('!7')
+    thin.remove('1.2.')
+    thin.remove('1.7.')
+    thin.remove('1.1.')
+
+
+    lists = [[] for _ in range(12)]
+    list_all_gr = []
+    list_alloc_2 = []
 
     col_range = ws.max_column
 
-    for i in range(1, len(data.values) + 2):
+    for i in range(1, len(res.values) + 2):
+
         for col in range(1, col_range + 1):
             cell_header = ws.cell(i, col)
-            cell_header.number_format = '#,##0'
             cell_header.alignment = Alignment(horizontal='right', vertical='center')
             cell_header.font = Font(name='Times New Roman', size=10, bold=True)
             cell_header.border = Border(left=Side(border_style='thin', color='FF000000'),
@@ -257,175 +514,195 @@ def formating(NII_test, file_NII):
         ws['B' + str(i)].alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
         ws['A' + str(i)].alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
+
         names = [ws['B' + str(i)].value]
         indexes = [ws['A' + str(i)].value]
-        for j in indexes:
-            ws['A' + str(i)].font = Font(name='Times New Roman', size=11, bold=True)
-            ws['B' + str(i)].font = Font(name='Times New Roman', size=11, bold=True)
-            if j in blue:
-                for col in range(1, col_range + 1):
-                    cell_header = ws.cell(i, col)
-                    cell_header.fill = PatternFill(start_color='87CEEB', fill_type="solid")
-                    cell_header.font = Font(name='Times New Roman', size=12, bold=True)
-                    cell_header.number_format = '#,##0'
-                ws['B' + str(i)] = ws['B' + str(i)].value.upper()
-                ws['B' + str(i)].font = Font(name='Times New Roman', size=12, bold=True)
-                ws['A' + str(i)].font = Font(name='Times New Roman', size=12, italic=True, bold=True)
-                ws['A' + str(i)].fill = PatternFill(fill_type='solid', start_color='E0FFFF')
-                ws['B' + str(i)].fill = PatternFill(fill_type='solid', start_color='87CEEB')
-            elif j in gray:
-                for col in range(1, col_range + 1):
-                    cell_header = ws.cell(i, col)
-                    cell_header.fill = PatternFill(start_color='C0C0C0', fill_type="solid")
-                    cell_header.font = Font(name='Times New Roman', size=11, bold=True)
-                    cell_header.number_format = '#,##0'
-                ws['B' + str(i)] = ws['B' + str(i)].value.upper()
-                ws['B' + str(i)].font = Font(name='Times New Roman', size=11, bold=True)
-                ws['A' + str(i)].font = Font(name='Times New Roman', size=11, italic=True, bold=True)
-                ws['A' + str(i)].fill = PatternFill(fill_type='solid', start_color='DCDCDC')
-                ws['B' + str(i)].fill = PatternFill(fill_type='solid', start_color='C0C0C0')
-            elif j in thin:
-                for col in range(1, col_range + 1):
-                    cell_header = ws.cell(i, col)
-                    cell_header.font = Font(name='Times New Roman', size=8, italic=True, bold=False)
-                    cell_header.number_format = '#,##0'
-                ws['B' + str(i)].font = Font(name='Times New Roman', size=8, italic=True, bold=False)
-                ws['B' + str(i)].alignment = Alignment(horizontal='right', vertical='center', wrap_text=True, )
-                ws['A' + str(i)].font = Font(name='Times New Roman', size=8, italic=True, bold=False)
-                ws.row_dimensions.group(i + 1, hidden=True)
 
-        for k in names:
-            if k == 'Чистий комісійний дохід':
-                for col in range(1, col_range + 1):
-                    cell_header = ws.cell(i, col)
-                    cell_header.fill = PatternFill(start_color='008080', fill_type="solid")
-                    cell_header.font = Font(name='Times New Roman', size=11, bold=True)
-                    cell_header.number_format = '#,##0'
-                ws['A' + str(i)].fill = PatternFill(fill_type='solid', start_color='008080')
-                ws['B' + str(i)].font = Font(name='Times New Roman', size=12, bold=True)
-                ws['B' + str(i)].fill = PatternFill(fill_type='solid', start_color='008080')
-            elif k == 'Непроцентні доходи':
-                for col in range(1, col_range + 1):
-                    cell_header = ws.cell(i, col)
-                    cell_header.fill = PatternFill(start_color='008080', fill_type="solid")
-                    cell_header.font = Font(name='Times New Roman', size=12, bold=True)
-                    cell_header.number_format = '#,##0'
-                ws['B' + str(i)] = ws['B' + str(i)].value.upper()
-                ws['A' + str(i)].fill = PatternFill(fill_type='solid', start_color='008080')
-                ws['B' + str(i)].font = Font(name='Times New Roman', size=12, bold=True)
-                ws['B' + str(i)].fill = PatternFill(fill_type='solid', start_color='008080')
+        def main_format(color, size):
+            for col in range(1, col_range + 1):
+                cell_header = ws.cell(i, col)
+                cell_header.fill = PatternFill(start_color=color, fill_type="solid")
+                cell_header.font = Font(name='Times New Roman', size=size, bold=True)
+                cell_header.number_format = '#,##0'
+            ws['B' + str(i)] = ws['B' + str(i)].value.upper()
+            ws['B' + str(i)].font = Font(name='Times New Roman', size=size, bold=True)
+            ws['A' + str(i)].font = Font(name='Times New Roman', size=size, italic=True, bold=True)
+            ws['B' + str(i)].alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            ws['A' + str(i)].fill = PatternFill(fill_type='solid', start_color=color)
+            ws['B' + str(i)].fill = PatternFill(fill_type='solid', start_color=color)
+            for col in range(6, col_range + 1, 4):
+                cell_header = ws.cell(i, col)
+                cell_header.number_format = '0%'
+
+        def low_format(color):
+            for col in range(1, col_range + 1):
+                cell_header = ws.cell(i, col)
+                cell_header.fill = PatternFill(start_color=color, fill_type="solid")
+                cell_header.font = Font(name='Times New Roman', size=9, italic=True, bold=False)
+                cell_header.number_format = '#,##0'
+            ws['B' + str(i)].font = Font(name='Times New Roman', size=9, bold=False)
+            ws['B' + str(i)].alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            ws['A' + str(i)].font = Font(name='Times New Roman', size=9, bold=False)
+            ws['A' + str(i)].fill = PatternFill(fill_type='solid', start_color=color)
+            ws['B' + str(i)].fill = PatternFill(fill_type='solid', start_color=color)
+            for col in range(6, col_range + 1, 4):
+                cell_header = ws.cell(i, col)
+                cell_header.number_format = '0%'
+
+        for j in indexes:
+            if j in blue:
+                main_format('B0E0E6', 12)
+                lists[0].append(i)
+            elif j in union:
+                main_format('3CB371', 11)
+                lists[1].append(i)
+            elif j in grey:
+                main_format('C0C0C0', 10)
+                lists[2].append(i)
+            elif j == '!7':
+                main_format('FFB233', 12)
+            elif len(j.split('.')[:-1]) == 4:
+                low_format('BD5E86')
+                lists[3].append(i)
+            elif len(j.split('.')[:-1]) == 5:
+                low_format('DDE533')
+                lists[4].append(i)
+            elif len(j.split('.')[:-1]) == 6:
+                low_format('90A8B8')
+                lists[5].append(i)
+            elif len(j.split('.')[:-1]) == 7:
+                low_format('D1C1E2')
+                lists[6].append(i)
+            elif len(j.split('.')[:-1]) == 8:
+                low_format('E1B0A2')
+                lists[7].append(i)
+            elif len(j.split('.')[:-1]) == 9:
+                low_format('A44953')
+                lists[8].append(i)
+            elif len(j.split('.')[:-1]) == 10:
+                low_format('5D8668')
+                lists[9].append(i)
+            elif j in all_col:
+                main_format('E5B9EB', 11)
+                list_all_gr.append(i)
+            elif j in all_color:
+                low_format('FFFFFF')
+                list_alloc_2.append(i)
+
+    for i in range(len(lists[0])):
+        lists[0][i] += 2
+    for i in range(0, len(lists[0]) - 1, 1):
+        ws.row_dimensions.group(lists[0][i] + 1, lists[0][i + 1] - 1, hidden=True, outline_level=1)
+    for i in range(len(list_all_gr)):
+        list_all_gr[i] += 2
+    for i in range(0, len(list_all_gr) - 1, 1):
+        ws.row_dimensions.group(list_all_gr[i] + 1, list_all_gr[i + 1] - 1, hidden=True, outline_level=3)
+    ws.row_dimensions.group(list_all_gr[-1] + 1, lists[0][-1] - 1, hidden=True, outline_level=3)
+
+    def dimension(lst, lvl, step, lst_2):
+        for i in range(len(lst)):
+            lst[i] += 2
+        for i in range(0, len(lst)-1, step):
+            for j in range(1, len(lst_2)-1):
+                if lst[i] < lst[i+1] < lst_2[j]:
+                    ws.row_dimensions.group(lst[i]+1, lst[i+1]-1, hidden=True, outline_level=lvl)
+                    break
+                elif lst[i] < lst_2[j] < lst[i + 1]:
+                    ws.row_dimensions.group(lst[i] + 1, lst_2[j] - 1, hidden=True, outline_level=lvl)
+                    break
+
+    dimension(lists[1], 2, 1, lists[0])
+    lists[1] = list(sorted(lists[0] + lists[1]))
+
+    dimension(lists[2], 3, 1, lists[1])
+    lists[2] = list(sorted(lists[1] + lists[2]))
+
+    dimension(lists[3], 4, 1, lists[2])
+    lists[3] = list(sorted(lists[2] + lists[3]))
+
+    dimension(lists[4], 5, 1, lists[3])
+
+
+
+    for i in range(1, len(res.values) + 2):
+        indexes = [ws['A' + str(i)].value]
+        for j in indexes:
+            if '#' in j or '!' in j:
+                ws['A' + str(i)] = np.nan
 
     ws.insert_rows(0)
+    ws.insert_rows(0)
 
-    list_slice = ['РАЗОМ', 'КОРПОРАТИВНИЙ БІЗНЕС', 'МСБ', 'РОЗДРІБНИЙ БІЗНЕС', 'ІНШІ']
+    for i in range(3, 30):
+        ws.cell(row=3, column=i).alignment = Alignment(horizontal='center', vertical='center')
 
-    ws.merge_cells(start_row=1, start_column=2, end_row=2, end_column=2)
-    ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
-    ws['B1'] = 'НЕПРОЦЕНТНІ ДОХОДИ'
-    ws['B1'].font = Font(name='Times New Roman', size=16, bold=True)
-    ws['B1'].alignment = Alignment(horizontal='center', vertical='center')
+    lst_names = ['Консолідовано Банк', 'Корпоративний бізнес', 'Корпоратив - мережа', 'VIP Корпоратив',
+                 'Малий та середній бізнес', 'Роздрібний  банкінг', 'Інші']
 
-    rd = ws.row_dimensions[1]
-    rs = ws.row_dimensions[2]
-    rd.height = 45
-    rs.height = 30
+    ws.merge_cells(start_row=2, start_column=1, end_row=3, end_column=1)
+    ws.merge_cells(start_row=2, start_column=2, end_row=3, end_column=2)
+
+    for i in range(2, 4):
+        ws['A2'] = 'Код статей'
+        ws['A2'].font = Font(name='Times New Roman', size=14, bold=True)
+        ws['A2'].alignment = Alignment(horizontal='center', vertical='center')
+        ws['A' + str(i)].border = Border(left=Side(border_style='thick', color='FF000000'),
+                                                  right=Side(border_style='thick', color='FF000000'),
+                                                  top=Side(border_style='thick', color='FF000000'),
+                                                  bottom=Side(style='thin', color='FF000000'))
+        ws['B2'] = 'Найменування статей'
+        ws['B2'].font = Font(name='Times New Roman', size=14, bold=True)
+        ws['B2'].alignment = Alignment(horizontal='center', vertical='center')
+        ws['B' + str(i)].border = Border(left=Side(border_style='thick', color='FF000000'),
+                                         right=Side(border_style='thick', color='FF000000'),
+                                         top=Side(border_style='thick', color='FF000000'),
+                                         bottom=Side(style='thin', color='FF000000'))
+        rd = ws.row_dimensions[2]
+        rs = ws.row_dimensions[3]
+        rd.height = 35
+        rs.height = 25
+        rq = ws.row_dimensions[1]
+        rq.height = 25
+
+    for i in range(3, 29):
+        ws.cell(row=2, column=i).border = Border(left=Side(border_style='thick', color='FF000000'),
+                                                 right=Side(border_style='thick', color='FF000000'),
+                                                 top=Side(border_style='thick', color='FF000000'),
+                                                 bottom=Side(style='thick', color='FF000000'))
 
     def slice(x, y, z, limit, lst):
-        while y != limit:
-            ws.merge_cells(start_row=1, start_column=x, end_row=1, end_column=y)
-            x += 3
-            y += 3
+        while y <= limit:
+            ws.merge_cells(start_row=2, start_column=x, end_row=2, end_column=y)
+            x += 4
+            y += 4
         for i in range(len(lst)):
-            ws.cell(row=1, column=z).value = lst[i]
-            ws.cell(row=1, column=z).alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            ws.cell(row=1, column=z).font = Font(name='Times New Roman', size=12, bold=True)
-            ws.cell(row=1, column=z).border = Border(left=Side(border_style='thin', color='FF000000'),
-                                                     right=Side(border_style='thin', color='FF000000'),
-                                                     top=Side(border_style='thin', color='FF000000'),
-                                                     bottom=Side(style='thin'))
-            z += 3
+            ws.cell(row=2, column=z).value = lst[i]
+            ws.cell(row=2, column=z).alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            ws.cell(row=2, column=z).font = Font(name='Times New Roman', size=12, bold=True)
 
-    slice(3, 5, 3, 20, list_slice)
-    slice(18, 20, 18, 59, lst_nazva)
+            z += 4
 
 
-    wb.save(file_NII)
+    slice(3, 6, 3, len(res.columns), lst_names)
+
+    for column in ws.columns:
+        lenght = max(len(str(cell.value)) for cell in column)
+        if lenght > 75:
+            lenght = 100
+        ws.column_dimensions[column[0].column_letter].width = lenght
+
+    ws['A1'] = sheet + '.2023'
+
+    freez_obl = ws['C4']
+    ws.freeze_panes = freez_obl
+    ws.title = sheet
+
+    wb.save(f"C:\\Users\\admin\PycharmProjects\\fin_b\\files\\{sheet}_2023.xlsx")
+    wb.close()
+    print(f"Час вигрузки задачі {sheet}", datetime.now() - startTime)
+    res.to_excel(f'res_{sheet}.xlsx', index=False)
+
+    return res
 
 
-formating('NII - test year.xlsx', f'NII на {correct_date} накопичувальний.xlsx')
-formating('NII - test month.xlsx', f'NII на {correct_date}.xlsx')
-
-
-
-# удаление заготовочных файлов
-path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'NII - test year.xlsx.')
-path2 = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'NII - test month.xlsx.')
-os.remove(path)
-os.remove(path2)
-# Считывание файлов за текущий месяц'
-
-wb_1 = openpyxl.load_workbook(f'NII на {correct_date}.xlsx')
-wb_2 = openpyxl.load_workbook(f'NII на {correct_date} накопичувальний.xlsx')
-wsheet_2 = wb_2['НЕПРОЦЕНТНІ ДОХОДИ']
-wsheet_2._parent = wb_1
-wb_1._add_sheet(wsheet_2)
-wsheet_2.title = '№ накопич'
-wb_1.save('Slice.xlsx')
-
-
-print('Разделение отчета NII на департаменты \n')
-
-def slice_three_dep(num, f_n, s_n, t_n):
-    w_b = openpyxl.load_workbook('Slice.xlsx')
-    ws_1 = w_b['НЕПРОЦЕНТНІ ДОХОДИ']
-    ws_2 = w_b['№ накопич']
-    ws_1.title = num
-    ws_2.title = num + str(' накопичувальний')
-
-    ws_1.delete_cols(3, f_n)
-    ws_1.delete_cols(6, s_n)
-    ws_1.delete_cols(t_n, 80)
-
-    ws_2.delete_cols(3, f_n)
-    ws_2.delete_cols(6, s_n)
-    ws_2.delete_cols(t_n, 80)
-
-    w_b.save(f'{num} {correct_date} NII.xlsx')
-
-
-slice_three_dep('1.38.', 3, 9, 12)
-slice_three_dep('1.50.', 6, 12, 9)
-slice_three_dep('1.20.', 9, 12, 9)
-
-
-def slice_other(num, f_n):
-    w_b = openpyxl.load_workbook('Slice.xlsx')
-    ws_1 = w_b['НЕПРОЦЕНТНІ ДОХОДИ']
-    ws_2 = w_b['№ накопич']
-    ws_1.title = num
-    ws_2.title = num + str(' накопичувальний')
-
-    ws_1.delete_cols(3, f_n)
-    ws_1.delete_cols(6, 80)
-
-    ws_2.delete_cols(3, f_n)
-    ws_2.delete_cols(6, 80)
-
-    w_b.save(f'{num} {correct_date} NII.xlsx')
-
-
-slice_other('0.48.', 42)
-slice_other('1.06.', 30)
-slice_other('1.10.', 33)
-slice_other('1.29.', 39)
-slice_other('1.46.', 51)
-slice_other('1.49.', 48)
-slice_other('1.51.', 27)
-slice_other('1.55.', 36)
-slice_other('1.56.', 45)
-
-path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'Slice.xlsx')
-os.remove(path)
-
-print('Процесс успешно завершен \n')
 
